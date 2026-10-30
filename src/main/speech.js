@@ -44,7 +44,14 @@ function chatModel() {
   } catch {
     // a bare node process has no app path
   }
-  files.push(path.join(os.homedir(), 'Library/Application Support/capri-desktop/config.json'));
+  if (process.platform === 'win32') {
+    const base = process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming');
+    files.push(path.join(base, 'capri-desktop', 'config.json'));
+  } else if (process.platform === 'darwin') {
+    files.push(path.join(os.homedir(), 'Library', 'Application Support', 'capri-desktop', 'config.json'));
+  } else {
+    files.push(path.join(os.homedir(), '.config', 'capri-desktop', 'config.json'));
+  }
   for (const file of files) {
     try {
       const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));

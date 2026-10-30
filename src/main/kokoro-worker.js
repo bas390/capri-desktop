@@ -1,7 +1,7 @@
 'use strict';
 
-// Speaks with the Kokoro model from lachydotmcg/capri-desktop, on the Mac build of
-// sherpa-onnx. The Windows DLLs in that pack are not loaded.
+// Speaks with the Kokoro model from lachydotmcg/capri-desktop. The native
+// sherpa-onnx library is chosen by kokoro.js for Mac or Windows.
 // One JSON object per line in, one JSON object per line out.
 
 const path = require('path');

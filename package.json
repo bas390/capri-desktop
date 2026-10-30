@@ -55,7 +55,12 @@
     ],
     "asarUnpack": [
       "hooks/**",
-      "src/main/windows.ps1"
+      "src/main/windows.ps1",
+      "src/main/kokoro-worker.js",
+      "node_modules/sherpa-onnx-win-*/**",
+      "node_modules/sherpa-onnx-darwin-*/**",
+      "node_modules/sherpa-onnx-linux-*/**",
+      "node_modules/sherpa-onnx-node/**"
     ],
     "win": {
       "target": "nsis",
@@ -71,6 +76,9 @@
     }
   },
   "optionalDependencies": {
-    "sherpa-onnx-darwin-arm64": "^2.0.1"
+    "sherpa-onnx-darwin-arm64": "^2.0.1",
+    "sherpa-onnx-darwin-x64": "^2.0.1",
+    "sherpa-onnx-win-x64": "^2.0.1",
+    "sherpa-onnx-win-arm64": "^2.0.1"
   }
 }
