@@ -153,6 +153,7 @@ export class Panel {
     this.replayEnter();
     this.place();
     this.decode(msg.line || '', msg.kind);
+    if (msg.line && msg.kind !== 'work') this.onSpeak?.(msg.line);
 
     if (msg.hold) this.hideTimer = setTimeout(() => this.hide(), msg.hold);
     return true;
@@ -315,6 +316,7 @@ export class Panel {
     if (!this.current?.chat) return;
     this.streamTo = [...text];
     this.streamDone = done;
+    this.onTalk?.(true, text);
     // an answer rewritten rather than added to (a reasoning block cut out, an error): from where they part
     let same = 0;
     const max = Math.min(this.streamShown, this.streamTo.length);
@@ -335,9 +337,12 @@ export class Panel {
     const caughtUp = this.streamShown >= chars.length;
     if (caughtUp && this.streamDone) {
       this.stopStream();
-      this.line.textContent = chars.join('');
+      const line = chars.join('');
+      this.line.textContent = line;
       this.line.classList.remove('is-streaming');
       this.glitchLine();
+      this.onSpeak?.(line);
+      this.onTalk?.(false);
     } else {
       // noise where the next characters land; still waiting for more, a little static at the end
       let tail = '';
@@ -490,7 +495,7 @@ export class Panel {
     }
     const chars = [...text];
     let done = 0;
-    this.onTalk?.(true);
+    this.onTalk?.(true, text);
     const step = () => {
       done = Math.min(chars.length, done + 2);
       const head = chars.slice(0, done).join('');

@@ -1,10 +1,11 @@
 'use strict';
 
-// Opening things when you ask her to (chat.js): an app from the Start menu (Store apps like Spotify
-// included), a Steam or Epic game, your music (the media keys: pause, next…, so it works with
-// Spotify and most players), a Spotify search, or a website. Windows only.
+// Opening things when you ask her to (chat.js): an app (the Start menu on Windows, /Applications
+// on macOS), a Steam or Epic game, your music, a Spotify search, or a website.
+// Media keys are Windows; on macOS she still opens Spotify, YouTube and sites.
 
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
 const { spawn, execFile } = require('node:child_process');
 const { randomUUID } = require('node:crypto');
@@ -12,6 +13,7 @@ const { app, shell } = require('electron');
 const { powershell } = require('./apps');
 
 const WIN = process.platform === 'win32';
+const MAC = process.platform === 'darwin';
 // not things to open from a chat: uninstallers, help pages and the like
 const SKIP = /uninstall|désinstaller|desinstalar|deinstall|readme|documentation|release notes|support center|website|manual/i;
 const STEAM_SKIP = /redistributable|dedicated server|steamworks/i;
@@ -27,7 +29,6 @@ const words = (text) => plain(text).split(/[^\p{L}\p{N}]+/u).filter((w) => w.len
 // Everything she can open: [{ name, kind: 'app' | 'steam' | 'epic', id }]
 async function launchables() {
   if (cache && Date.now() - cache.at < CACHE_MS) return cache.items;
-  if (!WIN) return [];
   const items = [];
   const seen = new Set();
   const add = (item) => {
@@ -36,6 +37,13 @@ async function launchables() {
     seen.add(key);
     items.push(item);
   };
+  if (MAC) {
+    for (const game of [...steamGames(macSteamRoot()), ...epicGames()]) add(game);
+    for (const appItem of macApps()) add(appItem);
+    cache = { at: Date.now(), items };
+    return items;
+  }
+  if (!WIN) return [];
   // games first: a game's own entry wins over a shortcut to it
   for (const game of [...steamGames(await steamRoot()), ...epicGames()]) add(game);
   // the Start menu's list is slow the first time (PowerShell starting cold): main.js asks for it early
@@ -44,6 +52,30 @@ async function launchables() {
     if (Name && AppID && !/^https?:/i.test(AppID)) add({ name: Name, kind: 'app', id: AppID });
   }
   if (out !== null) cache = { at: Date.now(), items }; // a list that failed isn't kept: next time, again
+  return items;
+}
+
+function macSteamRoot() {
+  const p = path.join(os.homedir(), 'Library', 'Application Support', 'Steam');
+  return fs.existsSync(path.join(p, 'steamapps')) ? p : null;
+}
+
+// Apps she can open by name: /Applications, the user's own, and the system ones.
+function macApps() {
+  const dirs = ['/Applications', '/System/Applications', path.join(os.homedir(), 'Applications')];
+  const items = [];
+  for (const dir of dirs) {
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      continue;
+    }
+    for (const name of entries) {
+      if (!name.endsWith('.app')) continue;
+      items.push({ name: name.slice(0, -4), kind: 'app', id: path.join(dir, name) });
+    }
+  }
   return items;
 }
 
@@ -90,7 +122,9 @@ function steamGames(root) {
 
 // Epic's games, from its launcher's manifests (not the Unreal Engine plugins it also keeps there)
 function epicGames() {
-  const dir = path.join(process.env.ProgramData || 'C:\\ProgramData', 'Epic', 'EpicGamesLauncher', 'Data', 'Manifests');
+  const dir = WIN
+    ? path.join(process.env.ProgramData || 'C:\\ProgramData', 'Epic', 'EpicGamesLauncher', 'Data', 'Manifests')
+    : path.join(os.homedir(), 'Library', 'Application Support', 'Epic', 'EpicGamesLauncher', 'Data', 'Manifests');
   let files = [];
   try {
     files = fs.readdirSync(dir).filter((f) => f.endsWith('.item'));
@@ -151,19 +185,19 @@ function desktopItems() {
 }
 
 // files that run something: never opened without a click, even named by you
-const RUNS = /\.(exe|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|msi|msp|reg|scr|com|jar|hta|cpl|pif)$/i;
+const RUNS = /\.(exe|bat|cmd|ps1|vbs|vbe|js|jse|wsf|wsh|msi|msp|reg|scr|com|jar|hta|cpl|pif|command|sh|tool)$/i;
 const risky = (item) => item?.kind === 'file' && RUNS.test(item.id);
 
 // Folders asked for by what they are ("ouvre mes téléchargements", "open the file explorer").
 const FOLDERS = [
-  ['explorer', /explorateur|file explorer|\bexplorer\b|ce pc|this pc|explorador|проводник/i],
-  ['recycle', /corbeille|recycle bin|\btrash\b|papelera|lixeira|корзин/i],
-  ['downloads', /t[ée]l[ée]chargements?|downloads?|descargas|transfer[êe]ncias|загрузк/i],
-  ['desktop', /\bbureau\b|\bdesktop\b|escritorio|[áa]rea de trabalho|рабоч\S* стол/i],
-  ['documents', /\bdocuments?\b|documentos|документ/i],
-  ['pictures', /\bimages\b|\bphotos\b|\bpictures\b|im[áa]genes|\bfotos\b|imagens|изображени|фото/i],
-  ['music', /dossier (de )?musique|music folder|carpeta de m[úu]sica|pasta de m[úu]sica|папк\S* (с )?музык/i],
-  ['videos', /\bvid[ée]os\b|v[íi]deos|видео/i],
+  ['explorer', /explorateur|file explorer|\bexplorer\b|ce pc|this pc|explorador|проводник|finder|ตัวจัดการไฟล์/i],
+  ['recycle', /corbeille|recycle bin|\btrash\b|papelera|lixeira|корзин|ถังขยะ/i],
+  ['downloads', /t[ée]l[ée]chargements?|downloads?|descargas|transfer[êe]ncias|загрузк|ดาวน์โหลด/i],
+  ['desktop', /\bbureau\b|\bdesktop\b|escritorio|[áa]rea de trabalho|рабоч\S* стол|เดสก์ท็อป|หน้าเดสก์ท็อป/i],
+  ['documents', /\bdocuments?\b|documentos|документ|เอกสาร/i],
+  ['pictures', /\bimages\b|\bphotos\b|\bpictures\b|im[áa]genes|\bfotos\b|imagens|изображени|фото|รูปภาพ|โฟลเดอร์รูป/i],
+  ['music', /dossier (de )?musique|music folder|carpeta de m[úu]sica|pasta de m[úu]sica|папк\S* (с )?музык|โฟลเดอร์เพลง|คลังเพลง/i],
+  ['videos', /\bvid[ée]os\b|v[íi]deos|видео|วิดีโอ|โฟลเดอร์วิดีโอ/i],
 ];
 
 function knownFolder(text) {
@@ -172,6 +206,11 @@ function knownFolder(text) {
 }
 
 function openKnown(id) {
+  if (MAC) {
+    if (id === 'explorer') return spawn('open', ['-a', 'Finder'], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+    if (id === 'recycle') return spawn('osascript', ['-e', 'tell application "Finder" to open trash'], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+    return shell.openPath(app.getPath(id));
+  }
   if (id === 'explorer') return spawn('explorer.exe', [], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   if (id === 'recycle') return spawn('explorer.exe', ['shell:RecycleBinFolder'], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return shell.openPath(app.getPath(id));
@@ -201,6 +240,10 @@ async function launch({ kind, id } = {}) {
   if (!item) throw new Error('not found');
   if (kind === 'steam') return shell.openExternal(`steam://rungameid/${id}`);
   if (kind === 'epic') return shell.openExternal(`com.epicgames.launcher://apps/${encodeURIComponent(id)}?action=launch&silent=true`);
+  if (MAC) {
+    spawn('open', ['-a', id], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
+    return undefined;
+  }
   spawn('explorer.exe', [`shell:AppsFolder\\${id}`], { detached: true, stdio: 'ignore' }).on('error', () => {}).unref();
   return undefined;
 }

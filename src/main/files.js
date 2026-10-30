@@ -6,6 +6,7 @@
 
 const fs = require('node:fs');
 const path = require('node:path');
+const { execFile } = require('node:child_process');
 const { app, shell, desktopCapturer, screen } = require('electron');
 const { powershell } = require('./apps');
 
@@ -21,9 +22,27 @@ const junk = (p) => JUNK.some((j) => p.includes(j));
 // files that are code, left out of a search by what's inside (any word shows up in some library)
 const CODE = ['js', 'mjs', 'cjs', 'ts', 'tsx', 'jsx', 'json', 'map', 'lock', 'yml', 'yaml', 'py', 'css', 'html', 'md', 'txt', 'xml', 'log'];
 
+// Spotlight, the Mac index: names (and the file type, when one was asked). null if it can't be asked.
+function spotlight(terms, exts) {
+  const safe = terms.map((t) => t.replace(/[^\p{L}\p{N}.]/gu, '')).filter(Boolean);
+  const types = exts.map((e) => e.replace(/[^a-z0-9]/gi, '')).filter(Boolean);
+  if (!safe.length && !types.length) return Promise.resolve([]);
+  const query = [
+    ...safe.map((t) => `kMDItemDisplayName == '*${t}*'cd`),
+    ...types.map((e) => `kMDItemFSName == '*.${e}'cd`),
+  ].join(' && ');
+  return new Promise((resolve) => {
+    execFile('mdfind', ['-onlyin', app.getPath('home'), query], { timeout: 10000 }, (err, out) => {
+      if (err) return resolve(null);
+      resolve([...new Set(String(out).split('\n').map((l) => l.trim()).filter(Boolean))].slice(0, 40));
+    });
+  });
+}
+
 // Windows Search: names first (every word in the name, of one of `exts` if any), then what's in
 // documents (not code). null if the index can't be asked.
 async function indexed(terms, exts) {
+  if (process.platform === 'darwin') return spotlight(terms, exts);
   const safe = terms.map((t) => t.replace(/[^\p{L}\p{N}.]/gu, '')).filter(Boolean);
   const types = exts.map((e) => e.replace(/[^a-z0-9]/gi, '')).filter(Boolean);
   if (!safe.length && !types.length) return [];

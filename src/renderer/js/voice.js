@@ -39,12 +39,76 @@ export class Voice {
     return ctx;
   }
 
-  configure({ muted, volume }) {
+  configure({ muted, volume, speech }) {
     if (typeof muted === 'boolean') this.muted = muted;
+    if (typeof speech === 'boolean') this.speech = speech;
+    if (this.muted || this.speech === false) this.stopSpeech();
     if (typeof volume === 'number') {
       this.volume = volume;
       if (this.master) this.master.gain.value = volume;
     }
+  }
+
+  // Her line, out loud. A newer line replaces the one still playing.
+  async speak(text, host) {
+    const line = String(text || '').replace(/\s+/g, ' ').trim();
+    if (this.muted || this.speech === false || line.length < 2 || line === this.said) return;
+    this.said = line;
+    const id = (this.sayId = (this.sayId || 0) + 1);
+    this.stopSpeech();
+    this.onPending?.(true);
+    let audio;
+    try {
+      audio = await host.speak(line);
+    } catch {
+      this.onPending?.(false);
+      return;
+    }
+    if (!audio || id !== this.sayId || this.muted || this.speech === false) {
+      this.onPending?.(false);
+      return;
+    }
+    const ctx = this.ensure();
+    if (ctx.state === 'suspended') await ctx.resume();
+    const copy = audio.buffer.slice(audio.byteOffset, audio.byteOffset + audio.byteLength);
+    let buffer;
+    try {
+      buffer = await ctx.decodeAudioData(copy);
+    } catch {
+      this.onPending?.(false);
+      return;
+    }
+    if (id !== this.sayId) {
+      this.onPending?.(false);
+      return;
+    }
+    this.playSpeech(buffer);
+    this.onPending?.(false);
+  }
+
+  // The neural read, played as it was made. Extra copies and filters made her
+  // sound like a radio, so the line stays a single dry voice.
+  playSpeech(buffer) {
+    const ctx = this.ctx;
+    const src = ctx.createBufferSource();
+    src.buffer = buffer;
+    src.connect(this.master);
+    src.start();
+    this.speechSources = [src];
+    this.onSpeaking?.(true);
+    src.onended = () => {
+      if (this.speechSources?.[0] !== src) return;
+      this.speechSources = null;
+      this.onSpeaking?.(false);
+    };
+  }
+
+  stopSpeech() {
+    for (const src of this.speechSources || []) {
+      src.onended = null;
+      try { src.stop(); } catch { /* already ended */ }
+    }
+    this.speechSources = null;
   }
 
   async loadCustom(list) {

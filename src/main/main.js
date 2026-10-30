@@ -20,6 +20,7 @@ const setup = require('./setup');
 const apps = require('./apps');
 const launch = require('./launch');
 const files = require('./files');
+const { synthesize } = require('./speech');
 const { ASSISTANTS, assistant } = require('./assistants');
 const activeAssistant = () => assistant(config.load().assistant); // Claude Code or Codex
 const activeHooks = () => activeAssistant().hooks;
@@ -148,6 +149,8 @@ function fitOverlay() {
 // clicked anymore. Off then on puts in a new one; her place on top and her size are set again too.
 function rearmOverlay() {
   if (!overlay || overlay.isDestroyed()) return;
+  // That hook only drops on Windows. On macOS toggling it resizes her window and drops clicks.
+  if (process.platform === 'darwin') return;
   overlay.setIgnoreMouseEvents(false);
   overlay.setIgnoreMouseEvents(true, { forward: true });
   overlay.setAlwaysOnTop(true, 'screen-saver');
@@ -195,14 +198,16 @@ function createOverlay() {
     },
   });
 
-  overlay.setAlwaysOnTop(true, 'screen-saver');
+  macFloat(overlay);
   overlay.setIgnoreMouseEvents(true, { forward: true });
   overlay.loadURL('capri://app/src/renderer/index.html');
   // always shown: put away, she's still there as her biochip in the corner. Sized again first:
   // Windows keeps a new window inside the work area, and resting on the taskbar it covers it too.
   overlay.once('ready-to-show', () => {
     fitOverlay();
+    macFloat(overlay);
     overlay.showInactive();
+    overlay.setIgnoreMouseEvents(true, { forward: true });
   });
   overlay.webContents.on('render-process-gone', (_e, details) => {
     console.error('[capri] renderer gone:', details.reason);
@@ -243,8 +248,9 @@ function playDemo() {
   next();
 }
 
-// During the demo, a little fake terminal for her to sit on and take over (window tracking is
-// Windows only, so only there). Opened without stealing focus; closing it drops her off it.
+// During the demo, a little fake terminal for her to sit on and take over. Opened without
+// stealing focus; closing it drops her off it. On Mac it stays a normal window (layer 0) so
+// the window list can see it, under the transparent overlay.
 let demoWin = null;
 const DEMO_TERMINAL = `<body style="margin:0;background:#14101c;color:#8f8aa3;font:13px/1.7 Consolas,monospace;padding:14px 18px">
 <div style="color:#36ff7a">PS C:\\night-city-api&gt; npm test -- gigs</div>
@@ -255,11 +261,11 @@ const DEMO_TERMINAL = `<body style="margin:0;background:#14101c;color:#8f8aa3;fo
 function demoWindow(open) {
   demoWin?.destroy();
   demoWin = null;
-  if (!open || process.platform !== 'win32') return false;
+  if (!open || (process.platform !== 'win32' && process.platform !== 'darwin')) return false;
   const b = overlay.getBounds();
   demoWin = new BrowserWindow({
     x: Math.round(b.x + b.width * 0.5 - 310), y: Math.round(b.y + b.height * 0.42), width: 620, height: 300,
-    show: false, alwaysOnTop: true, title: 'night-city-api — npm test', backgroundColor: '#14101c', autoHideMenuBar: true,
+    show: false, alwaysOnTop: process.platform === 'win32', title: 'night-city-api — npm test', backgroundColor: '#14101c', autoHideMenuBar: true,
   });
   demoWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(DEMO_TERMINAL)}`);
   demoWin.once('ready-to-show', () => demoWin?.showInactive());
@@ -351,6 +357,7 @@ function rebuildTray() {
       label: t.sound,
       submenu: [
         { label: t.mute, type: 'checkbox', checked: cfg.muted, click: (item) => updateConfig({ muted: item.checked }) },
+        { label: t.speech, type: 'checkbox', checked: cfg.speech !== false, click: (item) => updateConfig({ speech: item.checked }) },
         { type: 'separator' },
         {
           label: t.soundsDir,
@@ -887,6 +894,15 @@ function registerIpc() {
     else shell.openPath(dir);
     return { found: true, dir, file: fs.existsSync(file), label: fs.existsSync(file) ? path.basename(file) : path.basename(dir) };
   });
+  ipcMain.handle('speech:say', async (_e, text) => {
+    try {
+      const audio = await synthesize(text);
+      return audio;
+    } catch (err) {
+      console.error('[capri] speech', err.message);
+      return null;
+    }
+  });
   ipcMain.handle('sounds:list', () => {
     try {
       return fs.readdirSync(userSoundsDir())
@@ -1008,17 +1024,36 @@ async function debugHandler(route, body) {
 // without the graphics card, often fixes it.
 function applyRender() {
   const { render } = config.load();
+  // The only GL stack this Mac allows is ANGLE on Metal. Anything else (Vulkan, SwiftShader,
+  // desktop GL) makes the GPU process exit and the window flicker.
+  if (process.platform === 'darwin') {
+    app.commandLine.appendSwitch('use-gl', 'angle');
+    app.commandLine.appendSwitch('use-angle', 'metal');
+    app.commandLine.appendSwitch('disable-features', 'Vulkan,DefaultANGLEVulkan');
+    console.log('[capri] render mode: metal');
+    return;
+  }
   if (render === 'gl') app.commandLine.appendSwitch('use-angle', 'gl');
   if (render === 'software') {
     app.disableHardwareAcceleration();
     app.commandLine.appendSwitch('enable-unsafe-swiftshader'); // her drawing still needs WebGL, done on the CPU
   }
+  console.log('[capri] render mode:', render);
   // --dev: what Chromium ended up drawing with
   if (DEV) app.whenReady().then(() => setTimeout(() => console.log('[capri] display:', render, JSON.stringify(app.getGPUFeatureStatus())), 4000));
 }
 
+function macFloat(win) {
+  if (!win || win.isDestroyed()) return;
+  // screen-saver level on macOS sits on top of the menu bar and the system keeps shoving it
+  const level = process.platform === 'darwin' ? 'floating' : 'screen-saver';
+  win.setAlwaysOnTop(true, level);
+  if (process.platform === 'darwin') win.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+}
+
 function main() {
   applyRender();
+  if (process.platform === 'darwin') app.setName('Capri');
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     return;
@@ -1027,6 +1062,7 @@ function main() {
   if (process.platform === 'win32') app.setAppUserModelId('capri.desktop');
 
   app.whenReady().then(() => {
+    if (process.platform === 'darwin') app.dock.hide();
     if (!['codex', 'claude'].includes(config.load().assistant)) config.save({ assistant: activeAssistant().id });
     serveProtocol();
     registerIpc();

@@ -44,6 +44,13 @@ const TEXT = {
     push: 'Запушить в main',
     reply: 'Готово: **GET /gigs** с пагинацией по курсору, 6 тестов проходят. Пуш сделан.',
   },
+  th: {
+    prompt: 'เพิ่มเอนด์พอยต์ /gigs พร้อมแบ่งหน้าและเทสต์',
+    explore: 'ตรวจเส้นทางอื่น',
+    test: 'รันเทสต์ของ gigs',
+    push: 'พุชขึ้น main',
+    reply: 'เพิ่ม **GET /gigs** แบบแบ่งหน้าด้วยเคอร์เซอร์แล้ว เทสต์ผ่าน 6 ข้อ พุชเสร็จแล้ว',
+  },
 };
 
 // demo: not a real Claude Code event (she doesn't count it as her first contact)

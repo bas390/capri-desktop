@@ -37,7 +37,10 @@
   },
   "dependencies": {
     "@fontsource/chakra-petch": "^5.3.0",
-    "@fontsource/jetbrains-mono": "^5.3.0"
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/sarabun": "^5.3.0",
+    "node-edge-tts": "^1.2.12",
+    "sherpa-onnx-node": "^2.0.1"
   },
   "build": {
     "appId": "capri.desktop",
@@ -66,5 +69,8 @@
       "shortcutName": "Capri",
       "artifactName": "Capri-Setup-${version}.${ext}"
     }
+  },
+  "optionalDependencies": {
+    "sherpa-onnx-darwin-arm64": "^2.0.1"
   }
 }

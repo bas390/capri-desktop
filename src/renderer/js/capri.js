@@ -9,6 +9,7 @@
 
 import { SpriteRenderer, SPRITE } from './sprite.js';
 import { ACTS, NEUTRAL, Player } from './acting.js';
+import { STRIPS, mouthCell } from './strips.js';
 import { sleep, rand, pick, clamp, lerp, ease, tween, reducedMotion, today } from './util.js';
 
 const ON_TWOS = 1000 / 12;
@@ -30,6 +31,12 @@ const THROW_GRAVITY = 2500;
 const LEAP_GRAVITY = 3000;
 // the stances where she's turned by her own spin (this.spin) instead of her acts' lean
 const SPUN = new Set(['held', 'fly', 'down']);
+// One-shot strips. A stance change must not cut them off for the looping body strip.
+const CLIP_ONCE = new Set([
+  'walk', 'dance', 'perch_dance', 'grin', 'glitch', 'perch_glitch',
+  'arrive', 'leave', 'perch_arrive', 'perch_leave', 'wake',
+  'perch_blink', 'perch_blink_glitch',
+]);
 
 const UPLINK_DAY = 'capri.uplinkDay'; // the last day she sent the red light up
 
@@ -38,10 +45,13 @@ const INK = [0.08, 0.06, 0.11];
 const RED = [1, 0.13, 0.32];
 
 export class Capri {
-  constructor({ root, canvas, image, fx, voice }) {
+  constructor({ root, canvas, image, fx, voice, strips = null, reel = null }) {
     this.root = root;
     this.canvas = canvas;
     this.sprite = new SpriteRenderer(canvas, image);
+    this.strips = strips;
+    this.reel = reel;
+    this.strip = null; // { name, loop, start } while a sprite strip is on screen
     this.fx = fx;
     this.voice = voice;
 
@@ -92,7 +102,8 @@ export class Capri {
     const now = performance.now();
     this.lastActivity = now;
     this.nextTwitch = now + rand(4000, 9000);
-    this.nextMove = now + rand(40000, 80000);
+    this.nextMove = now + rand(8000, 16000);
+    this.nextLedge = now + 2000; // sit on a window edge soon, even while a chat is holding her still
     this.nextGaze = now + rand(40000, 90000);
     this.nextShed = now + rand(3000, 8000);
     this.nextNotice = 0;
@@ -352,15 +363,25 @@ export class Capri {
     }
   }
 
-  // Where her feet go so that her hips rest on the window's top edge.
+  // Feet position that puts the perch seat (79% down the cell, same as Lachy's
+  // SitY) on the window's top edge. No extra drop: that edge is the ledge.
   seat(win, dx) {
-    return { x: win.x + dx, y: win.y + 3 + (SPRITE.feet.y - SPRITE.hip) * this.scale };
+    const s = this.scale;
+    return { x: win.x + dx, y: win.y + (SPRITE.feet.y - SPRITE.hip) * s };
   }
 
   canSit(win) {
     if (win.id === 'taskbar') return true;
-    const roomAbove = SPRITE.hip * this.scale + 12;
-    return !win.max && win.w > 260 && win.y > roomAbove && win.y < this.view.floor - 80;
+    if (win.max || this.fullWindow(win)) return false;
+    return win.w > 260 && win.h > 120 && win.y < this.view.floor - 80;
+  }
+
+  // A zoomed or full-screen window. Its top edge is the top of the work area, and
+  // she sits above that edge, so a full window puts her off the screen. Mac does
+  // not mark those windows as maximized.
+  fullWindow(win) {
+    const { w, h } = this.view;
+    return win.y < 48 && win.w > w * 0.85 && win.h > h * 0.72;
   }
 
   // Is her spot on that ledge hidden under a window that's above it?
@@ -400,7 +421,7 @@ export class Capri {
     const options = [];
     for (const win of this.windows.wins) {
       if (win.id === except || !this.canSit(win)) continue;
-      const dx = clamp(rand(win.w * 0.18, win.w * 0.6), 60, Math.max(60, win.w - 190));
+      const dx = clamp(rand(win.w * 0.22, win.w * 0.48), 70, Math.max(70, win.w - 180));
       if (this.covered(win, win.x + dx)) continue;
       options.push({ win, dx });
     }
@@ -424,10 +445,191 @@ export class Capri {
     this.behave(now);
   }
 
+  // Show one of Lachy's frame strips. A one-shot ends itself. Looping ones stay until replaced.
+  playStrip(name, { loop = false, restore = true } = {}) {
+    if (!this.strips?.[name] || !STRIPS[name]) return;
+    if (this.strip?.name === name && this.strip.loop === loop) return;
+    this.strip = { name, loop, restore, start: performance.now() };
+  }
+
+  // The strip that belongs to where she is, when no one-shot is playing.
+  // While a line is typing out, or her voice is still going, her mouth flaps on the
+  // standing strip. The five mouth drawings only line up on that strip.
+  setLineTalking(on, text) {
+    if (text) this.talkLine = text;
+    this.lineTalking = on;
+    // The letters finish before the voice comes back. Keep the mouth until that
+    // voice ends, or until we know there won't be one.
+    if (!on && (this.speechTalking || this.speechPending)) return;
+    this.syncTalk();
+  }
+
+  setSpeechTalking(on) {
+    this.speechTalking = on;
+    this.syncTalk();
+  }
+
+  setSpeechPending(on) {
+    this.speechPending = on;
+    if (!on) this.syncTalk();
+  }
+
+  syncTalk() {
+    const on = Boolean(this.lineTalking || this.speechTalking);
+    if (on && !this.talking) this.talkAt = performance.now();
+    const was = this.talking;
+    this.talking = on;
+    if (on) {
+      this.showTalking();
+      return;
+    }
+    if (!was) return;
+    if (this.act?.player?.name === 'talk') this.endAct(false);
+    if (this.strip?.name === 'idle') this.strip = null;
+    this.syncBodyStrip();
+  }
+
+  showTalking() {
+    // A dive into a window uses the body. The perched sheet would stay on the ledge
+    // and play on top of the possession.
+    if (this.suppressStrip) return;
+    // On a ledge she stays the perched drawing. The standing mouth sheet would
+    // lift her off the window edge for the whole line.
+    if (this.stance === 'sit' && this.strips?.perch && !SPUN.has(this.stance)) {
+      this.playStrip('perch', { loop: true });
+      return;
+    }
+    if (this.strips?.idle && this.strips?.mouth && !SPUN.has(this.stance)) {
+      this.playStrip('idle', { loop: true });
+      return;
+    }
+    if (this.strip) this.strip = null;
+    if (this.act?.player?.name !== 'talk') this.perform('talk');
+  }
+
+  syncBodyStrip() {
+    if (!this.strips) return;
+    if (this.suppressStrip) {
+      this.strip = null;
+      return;
+    }
+    if (this.strip && CLIP_ONCE.has(this.strip.name)) return;
+    if (this.hidden || this.stowed || this.dormant) {
+      this.strip = null;
+      return;
+    }
+    if (this.stance === 'sit') {
+      this.playStrip('perch', { loop: true });
+      return;
+    }
+    if (this.talking) return;
+    if (this.stance === 'held') {
+      this.playStrip('dangle', { loop: true });
+      return;
+    }
+    if (this.mode === 'sleep' && this.stance === 'stand') {
+      this.playStrip('sleep', { loop: true });
+      return;
+    }
+    if (this.strip) this.strip = null;
+  }
+
+  // Draw the current strip into the reel canvas. True while it's on screen, so the
+  // deformed body stays invisible underneath and still takes the click.
+  drawStrip(now) {
+    const reel = this.reel;
+    if (!reel) return false;
+    const playing = this.strip;
+    const img = playing && this.strips?.[playing.name];
+    if (!playing || !img) {
+      reel.hidden = true;
+      return false;
+    }
+    const spec = STRIPS[playing.name];
+    // Step at most a couple of frames. A stall must not run the whole gif out.
+    if (!playing.mark) {
+      playing.mark = now;
+      playing.frame = 0;
+      playing.acc = 0;
+    }
+    const stepMs = 1000 / spec.fps;
+    const gap = Math.min(Math.max(0, now - playing.mark), stepMs * 2);
+    playing.mark = now;
+    playing.acc += gap;
+    let wrapped = false;
+    while (playing.acc >= stepMs && (playing.loop || playing.frame < spec.count)) {
+      playing.acc -= stepMs;
+      playing.frame += 1;
+      if (playing.loop && playing.frame % spec.count === 0) wrapped = true;
+    }
+    if (!playing.loop && playing.frame >= spec.count) {
+      const restore = playing.restore !== false;
+      this.strip = null;
+      if (restore) this.syncBodyStrip();
+      if (this.strip) return this.drawStrip(now);
+      reel.hidden = true;
+      return false;
+    }
+    // Lachy's blink: on a new lap of the perch, swap cells 9–12 for the blink
+    // sheet. The clip itself keeps going, so she doesn't vanish and restart.
+    if (wrapped && playing.name === 'perch') {
+      const roll = Math.random();
+      playing.blink = roll < 0.1 ? 'perch_blink_glitch' : roll < 0.55 ? 'perch_blink' : null;
+    }
+    let cell = playing.frame % spec.count;
+    let shown = img;
+    const blinkName = playing.blink;
+    const blink = blinkName && this.strips[blinkName];
+    const blinkCount = blinkName && STRIPS[blinkName] ? STRIPS[blinkName].count : 0;
+    if (blink && cell >= 9 && cell < 9 + blinkCount) {
+      shown = blink;
+      cell -= 9;
+    }
+    const cellW = img.cellW || img.width / spec.count;
+    const cellH = img.cellH || img.height;
+    const tall = SPRITE.height * this.scale * spec.scale;
+    const wide = tall * (cellW / cellH);
+    const cssW = Math.max(1, Math.round(wide));
+    const cssH = Math.max(1, Math.round(tall));
+    const resized = reel.width !== cssW || reel.height !== cssH;
+    if (resized) {
+      reel.width = cssW;
+      reel.height = cssH;
+      reel.style.width = `${cssW}px`;
+      reel.style.height = `${cssH}px`;
+    }
+    const mouthAt = playing.name === 'idle' && this.talking && this.strips.mouth?.frames
+      ? mouthCell(this.talkLine, now, this.talkAt) : -1;
+    const drawn = `${playing.name}:${blinkName || ''}:${cell}:${mouthAt}`;
+    if (playing.drawn !== drawn || resized) {
+      const ctx = reel.getContext('2d');
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, cssW, cssH);
+      const sheet = shown.frames ? shown : img;
+      const cel = sheet.frames ? sheet.frames[cell] : null;
+      if (cel) ctx.drawImage(cel, 0, 0, cssW, cssH);
+      else ctx.drawImage(sheet, cell * (sheet.cellW || cellW), 0, sheet.cellW || cellW, sheet.cellH || cellH, 0, 0, cssW, cssH);
+      if (mouthAt >= 0) ctx.drawImage(this.strips.mouth.frames[mouthAt], 0, 0, cssW, cssH);
+      playing.drawn = drawn;
+    }
+    const feetX = (SPRITE.pad + SPRITE.feet.x) * this.scale;
+    const feetY = (SPRITE.pad + SPRITE.feet.y) * this.scale;
+    const hipY = (SPRITE.pad + SPRITE.hip) * this.scale;
+    reel.style.left = `${feetX - cssW / 2}px`;
+    reel.style.top = spec.anchor === 'seat' ? `${hipY - cssH * spec.seat}px` : `${feetY - cssH}px`;
+    reel.style.transformOrigin = 'center center';
+    reel.style.transform = `scale(${-this.facing}, 1)`;
+    reel.hidden = false;
+    return true;
+  }
+
   drawFrame(now = performance.now()) {
     this.lastDraw = now;
     this.animate(now);
-    this.sprite.draw(this.p);
+    const showing = this.drawStrip(now);
+    this.canvas.style.opacity = showing ? '0' : '';
+    if (!showing) this.sprite.draw(this.p);
     this.place();
   }
 
@@ -537,8 +739,16 @@ export class Capri {
       return;
     }
 
+    // Chat holds nextMove for a long time so she doesn't wander off. Sitting on the
+    // window in front is separate: she still goes to that edge.
+    if (this.wander && this.stance === 'stand' && this.mode !== 'sleep' && now > this.nextLedge) {
+      const seat = this.pickSeat();
+      this.nextLedge = now + (seat ? rand(20000, 40000) : rand(3000, 6000));
+      if (seat) this.sitOn(seat);
+    }
+
     if (this.mode === 'idle' && now > this.nextMove) {
-      this.nextMove = now + rand(25000, 70000);
+      this.nextMove = now + rand(14000, 32000);
       this.wanderStep();
     }
 
@@ -564,28 +774,81 @@ export class Capri {
       }
     }
     if (this.stance === 'sit' && this.perch?.id === 'taskbar') {
-      // nothing to hop off or take over down there: a flourish, or off for a bit (she comes back)
-      if (Math.random() < 0.6) this.flourish();
+      // nothing to hop off or take over down there: a flourish, a dance, or off for a bit
+      const r = Math.random();
+      if (r < 0.28) this.jam();
+      else if (r < 0.72) this.flourish();
       else this.teleport(this.spot('random'));
       return;
     }
     if (this.stance === 'sit') {
       const r = Math.random();
-      if (r < 0.3) this.flourish();
-      else if (r < 0.5 && this.canPossess()) this.possess();
-      else if (r < 0.75) this.fall(); // just hops off the ledge
+      if (r < 0.62 && this.canPossess()) this.possess();
+      else if (r < 0.78) this.jam();
+      else if (r < 0.9) this.flourish();
+      else if (r < 0.96) this.fall(); // just hops off the ledge
       else this.teleport(this.spot('random'));
       return;
     }
     const seat = this.pickSeat();
     const r = Math.random();
-    if (seat && r < 0.35) this.sitOn(seat);
-    else if (r < 0.6) this.peek();
-    else if (r < 0.85) this.teleport(this.spot('random'));
+    if (seat && r < 0.72) {
+      this.sitOn(seat).then(() => {
+        if (this.stance === 'sit' && this.perch?.id !== 'taskbar' && this.canPossess()) {
+          this.nextMove = performance.now() + rand(6000, 12000);
+        }
+      });
+    } else if (r < 0.46) this.stroll();
+    else if (r < 0.58) this.jam();
+    else if (r < 0.74) this.peek();
+    else if (r < 0.9) this.teleport(this.spot('random'));
     else this.flourish();
   }
 
+  // The dance sheet loops until something cuts it. A jam is a few beats, then she stops.
+  async jam() {
+    if (this.busy || this.hidden || this.mode !== 'idle' || SPUN.has(this.stance)) return;
+    const clip = this.stance === 'sit' ? 'perch_dance' : 'dance';
+    this.playStrip(clip, { loop: true });
+    const job = this.perform('dance');
+    await sleep(2200);
+    if (this.act?.player?.name === 'dance') this.endAct(true);
+    if (this.strip?.name === clip) this.strip = null;
+    this.syncBodyStrip();
+    await job;
+  }
+
+  // A short drift across the screen while she strides. She already floats, so the
+  // steps carry her along instead of planting her on the floor.
+  async stroll() {
+    if (this.busy || this.hidden || this.stance !== 'stand' || this.mode !== 'idle') return;
+    const dir = this.pos.x < this.view.w * 0.3 ? 1 : this.pos.x > this.view.w * 0.7 ? -1 : (Math.random() < 0.5 ? -1 : 1);
+    const to = clamp(this.pos.x + dir * rand(90, 170), 80, this.view.w - 80);
+    if (Math.abs(to - this.pos.x) < 36) return;
+    this.facing = -dir; // drawn reaching left, so the other way is the way she's going
+    const from = this.pos.x;
+    const started = performance.now();
+    const dur = 2500;
+    let going = true;
+    const step = (now) => {
+      if (!going) return;
+      const k = Math.min(1, (now - started) / dur);
+      this.pos.x = from + (to - from) * k;
+      if (k < 1) requestAnimationFrame(step);
+    };
+    requestAnimationFrame(step);
+    this.playStrip('walk', { loop: true });
+    await this.perform('walk', dir);
+    going = false;
+    if (this.strip?.name === 'walk') this.strip = null;
+    this.syncBodyStrip();
+  }
+
   flourish() {
+    if (this.strips && Math.random() < 0.4) {
+      this.playStrip(this.stance === 'sit' ? 'perch_glitch' : 'grin');
+      return;
+    }
     if (this.stance === 'sit') this.perform(pick(['look', 'look', 'split']));
     else this.perform(pick(['spin', 'look', 'hop', 'curious', 'split']), this.towardCenter());
   }
@@ -627,6 +890,7 @@ export class Capri {
     if (stance !== 'down') this.lying = null;
     this.base = this.restBase(dir);
     this.pivot();
+    this.syncBodyStrip();
   }
 
   // The cycle under her acts: her stance's, or holding her arm out at what she's showing you.
@@ -657,6 +921,8 @@ export class Capri {
     this.mode = mode;
     if (mode === 'sleep') this.sleptAt = now;
     this.onMode?.(mode, prev);
+    if (prev === 'sleep' && mode !== 'sleep' && this.stance === 'stand') this.playStrip('wake');
+    else this.syncBodyStrip();
     if (this.stance === 'stand') this.base = this.restBase();
     const p = this.p;
     if (mode === 'sleep') tween(p, { alpha: 0.55, sparkle: 0.35, boil: 0.4 }, 900, ease.inOut);
@@ -1140,6 +1406,7 @@ export class Capri {
 
   // Come back at `to`: a column of light down to her, the body unfolding, two impact frames.
   async arrive(to, { face = null, stance = 'stand', perch = null, peekSide = null, dir = 0, fromHead = null, beam = true } = {}) {
+    this.suppressStrip = false;
     const p = this.p;
     const s = this.scale;
     const facing = face ?? (to.x > this.view.w / 2 ? 1 : -1);
@@ -1368,6 +1635,10 @@ export class Capri {
     this.busy = true;
     this.wake();
     this.onTeleport?.('start');
+    // The perched sheet and the dive were both on screen. Drop the sheet so she
+    // coils and goes in, and stay gone until she climbs back out.
+    this.suppressStrip = true;
+    this.strip = null;
     await this.perform('dive');
     const head = await this.vanish({ beam: false });
     this.fx.streak(head.x, head.y, this.pos.x, win.y + 40 * s);

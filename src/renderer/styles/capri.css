@@ -52,6 +52,36 @@
   unicode-range: U+0301, U+0400-045F, U+0490-0491, U+04B0-04B1, U+2116;
 }
 
+/* Thai: neither display face has Thai glyphs, so Sarabun stands in for that block only */
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('../../../node_modules/@fontsource/sarabun/files/sarabun-thai-600-normal.woff2') format('woff2');
+  font-weight: 600;
+  font-display: block;
+  unicode-range: U+0E00-0E7F;
+}
+@font-face {
+  font-family: 'Chakra Petch';
+  src: url('../../../node_modules/@fontsource/sarabun/files/sarabun-thai-700-normal.woff2') format('woff2');
+  font-weight: 700;
+  font-display: block;
+  unicode-range: U+0E00-0E7F;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../../../node_modules/@fontsource/sarabun/files/sarabun-thai-400-normal.woff2') format('woff2');
+  font-weight: 400;
+  font-display: block;
+  unicode-range: U+0E00-0E7F;
+}
+@font-face {
+  font-family: 'JetBrains Mono';
+  src: url('../../../node_modules/@fontsource/sarabun/files/sarabun-thai-600-normal.woff2') format('woff2');
+  font-weight: 600;
+  font-display: block;
+  unicode-range: U+0E00-0E7F;
+}
+
 :root {
   /* palette sampled from the show */
   --ink: oklch(0.17 0.035 300);
@@ -109,6 +139,12 @@ body {
 
 .capri__sprite {
   display: block;
+}
+
+.capri__reel {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
 }
 
 .fx {
@@ -208,6 +244,10 @@ body {
   clip-path: polygon(14% 4%, 96% 4%, 96% 79%, 82% 96%, 4% 96%, 4% 18%);
 }
 
+html.is-mac .panel__face img {
+  transform: scaleY(-1);
+}
+
 .panel.is-entering .panel__face img,
 .panel[data-kind='alert'] .panel__face img {
   animation: face-glitch 600ms steps(1, end) 1;
@@ -226,6 +266,14 @@ body {
   68% { transform: none; }
 }
 
+@keyframes face-glitch-mac {
+  0% { transform: translate(3px, 0) scaleY(-1); }
+  12% { transform: translate(-4px, 1px) scaleY(-1); }
+  24% { transform: scaleY(-1); }
+  60% { transform: translate(2px, -1px) scaleY(-1); }
+  68% { transform: scaleY(-1); }
+}
+
 /* her expression changing: three drawings, knocked sideways, squashed, back */
 .panel__face img.is-swapping {
   animation: face-swap 170ms steps(1, end) 1;
@@ -236,6 +284,22 @@ body {
   33% { transform: translateX(5px) scaleY(0.82); }
   66% { transform: translateX(-2px); }
   100% { transform: none; }
+}
+
+@keyframes face-swap-mac {
+  0% { transform: translateX(-6px) skewX(-10deg) scaleY(-1); opacity: 0.7; }
+  33% { transform: translateX(5px) scaleY(-0.82); }
+  66% { transform: translateX(-2px) scaleY(-1); }
+  100% { transform: scaleY(-1); }
+}
+
+html.is-mac .panel.is-entering .panel__face img,
+html.is-mac .panel[data-kind='alert'] .panel__face img {
+  animation-name: face-glitch-mac;
+}
+
+html.is-mac .panel__face img.is-swapping {
+  animation-name: face-swap-mac;
 }
 
 .panel__body {
@@ -847,6 +911,22 @@ html[data-motion='reduced'] .panel__bar {
 .ticker[data-thinking='true'] .ticker__verb::after {
   content: '…';
   letter-spacing: 0;
+}
+
+/* Thai marks sit above and below the line, and wide tracking pulls the clusters apart */
+html[lang='th'] .panel__line,
+html[lang='th'] .ticker__plate {
+  line-height: 1.55;
+  letter-spacing: 0;
+}
+
+html[lang='th'] .panel__meta,
+html[lang='th'] .panel__state,
+html[lang='th'] .panel__action,
+html[lang='th'] .report__label,
+html[lang='th'] .ticker__verb,
+html[lang='th'] .panel__note b {
+  letter-spacing: 0.02em;
 }
 
 .ticker[data-thinking='true'] .ticker__target {

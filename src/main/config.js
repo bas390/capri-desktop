@@ -7,13 +7,15 @@ const { app } = require('electron');
 const DEFAULTS = {
   scale: 0.6,        // sprite scale, 0.6 ≈ 250px tall
   muted: false,
+  speech: true,      // she says her lines out loud (a neural voice, colored as her)
   volume: 0.7,
-  lang: 'auto',      // 'auto' follows the system language, or 'fr' / 'en'
+  lang: 'auto',      // 'auto' follows the system language, or 'fr' / 'en' / 'es' / 'pt' / 'ru' / 'th'
   displayId: null,   // null = primary display
   wander: true,      // random teleports when idle
   possess: true,     // now and then she dives into the window she sits on and takes it over
   visible: true,
   welcomed: false,   // she has introduced herself (her welcome panel)
+  guided: false,     // she has shown the "what should I show you?" menu once
   assistant: 'auto', // the coding assistant she watches: 'claude' or 'codex' ('auto': whichever has her hooks)
   linked: false,     // a Claude Code event has reached her at least once
   chatModel: null,   // the model she talks with (null: the provider's first one)

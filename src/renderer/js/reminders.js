@@ -4,7 +4,7 @@
 // the smallest model. They're kept in her settings and survive a restart; one that came due while
 // she was off, she brings up when she's back.
 
-const TRIGGER = /(rappelle[- ]?(?:moi|nous)|fais[- ]moi penser|pense à me (?:le )?(?:rappeler|dire)|n['’]oublie pas de me (?:le )?(?:rappeler|dire)|mets[- ]moi un rappel|remind me|set (?:a|an) (?:reminder|alarm)|recu[eé]rd(?:a|e)me|recordarme|av[ií]same|pon(?:me)? un recordatorio|me lembr[ae]|lembr[ae][- ]me|me avis[ae]|cri[ae] um lembrete|напомни(?:те)?(?: мне)?|поставь напоминание)/i;
+const TRIGGER = /(rappelle[- ]?(?:moi|nous)|fais[- ]moi penser|pense à me (?:le )?(?:rappeler|dire)|n['’]oublie pas de me (?:le )?(?:rappeler|dire)|mets[- ]moi un rappel|remind me|set (?:a|an) (?:reminder|alarm)|recu[eé]rd(?:a|e)me|recordarme|av[ií]same|pon(?:me)? un recordatorio|me lembr[ae]|lembr[ae][- ]me|me avis[ae]|cri[ae] um lembrete|напомни(?:те)?(?: мне)?|поставь напоминание|ช่วยเตือน|เตือนฉัน|เตือนหน่อย|ตั้งเตือน|อย่าลืมเตือน)/i;
 
 // small numbers said in words (in 5 of her languages)
 const WORDS = {
@@ -19,30 +19,34 @@ const WORDS = {
   trente: 30, thirty: 30, treinta: 30, trinta: 30, тридцать: 30,
   quarante: 40, forty: 40, cuarenta: 40, quarenta: 40, сорок: 40,
   cinquante: 50, fifty: 50, cincuenta: 50, cinquenta: 50, пятьдесят: 50,
+  หนึ่ง: 1, สอง: 2, สาม: 3, สี่: 4, ห้า: 5, สิบ: 10, สิบห้า: 15, ยี่สิบ: 20, สามสิบ: 30, สี่สิบ: 40, ห้าสิบ: 50,
 };
 const NUM = `(\\d+(?:[.,]\\d+)?|${Object.keys(WORDS).sort((a, b) => b.length - a.length).join('|')})`;
-const UNIT = '(secondes?|seconds?|secs?|segundos?|секунд[уы]?|сек|s|minutes?|minutos?|mins?|mn|минут[уы]?|мин|m|heures?|hours?|hrs?|horas?|час(?:а|ов)?|ч|h)';
-const SOON = '(?<![\\p{L}])(?:dans|in|en|em|daqui a|dentro de|через)';
+// Thai units are written against the next word ("นาทีให้"), so they may be followed by a letter.
+// A bare "วิ" still must not eat the start of "วิธี".
+const UNIT = '((?:secondes?|seconds?|secs?|segundos?|секунд[уы]?|сек|s|minutes?|minutos?|mins?|mn|минут[уы]?|мин|m|heures?|hours?|hrs?|horas?|час(?:а|ов)?|ч|h)(?![\\p{L}])|วินาที|นาที|ชั่วโมง|ชม\\.?|วิ(?![\\u0E01-\\u0E2E]))';
+// "อีก" is often written against the word before it ("เตือนอีก 20 นาที"), so it does not need a gap
+const SOON = '(?:(?<![\\p{L}])(?:dans|in|en|em|daqui a|dentro de|через)|ในอีก|ภายใน|อีก)';
 // "dans 20 min", "in 1 hour and 30 minutes", "через 2 часа"
-const IN = new RegExp(`${SOON}\\s+${NUM}\\s*${UNIT}(?![\\p{L}])(?:\\s*(?:et|and|y|e|и)?\\s*${NUM}\\s*${UNIT}(?![\\p{L}]))?`, 'iu');
+const IN = new RegExp(`${SOON}\\s*${NUM}\\s*${UNIT}(?:\\s*(?:et|and|y|e|и|กับ)?\\s*${NUM}\\s*${UNIT})?`, 'iu');
 // "dans 1h30"
 const IN_HM = new RegExp(`${SOON}\\s+(\\d{1,2})\\s*h\\s*(\\d{1,2})(?!\\d)`, 'iu');
 // "dans une demi-heure", "in half an hour", "через полчаса", "dans un quart d'heure"
-const IN_HALF = new RegExp(`${SOON}\\s+(?:une |a |an |um |uma )?(demi[- ]heure|half an hour|media hora|meia hora|полчаса|quart d['’]heure|quarter of an hour|cuarto de hora|четверть часа)`, 'iu');
+const IN_HALF = new RegExp(`${SOON}\\s*(?:une |a |an |um |uma )?(demi[- ]heure|half an hour|media hora|meia hora|полчаса|quart d['’]heure|quarter of an hour|cuarto de hora|четверть часа|ครึ่งชั่วโมง|ครึ่งชม\\.?)`, 'iu');
 // "через час", "через минуту"
 const IN_ONE = /через\s+(час|минуту)(?![\p{L}])/iu;
 // "à 18h30", "at 6:30 pm", "a las 18:00", "às 18h", "в 18:00", or a bare "18h30" / "18:30" / "6pm"
-const AT = /(?:(?:à|a|at|a las|a la|às|as|в|к)\s+)?(?<![\d:])(\d{1,2})(?:\s*(?:h|:|\.)\s*(\d{2})?|\s*(?:heures?|hours?|horas?|час(?:а|ов)?)\b)?\s*(a\.?m\.?|p\.?m\.?)?(?![\d\p{L}])/iu;
+const AT = /(?:(?:à|a|at|a las|a la|às|as|в|к|ตอน|เวลา)\s*)?(?<![\d:])(\d{1,2})(?:\s*(?:h|:|\.)\s*(\d{2})?|\s*(?:heures?|hours?|horas?|час(?:а|ов)?)\b)?\s*(?:น\.?)?\s*(a\.?m\.?|p\.?m\.?)?(?![\d\p{L}])/iu;
 // words, start and end, in any alphabet (\b only knows ASCII: not "amanhã", not Cyrillic)
 const word = (list, flags = 'iu') => new RegExp(`(?<![\\p{L}])(?:${list})(?![\\p{L}])`, flags);
-const NOON = word('(?:(?:à|at|a|al|ao|в)\\s+)?(?:midi|noon|mediod[ií]a|meio-dia|полдень)');
-const MIDNIGHT = word('(?:(?:à|at|a|al|в)\\s+)?(?:minuit|midnight|medianoche|meia-noite|полночь)');
-const TOMORROW = word('demain|tomorrow|amanh[ãa]|завтра|(?<!de la\\s)mañana');
-const PM = word("ce soir|du soir|de l['’]après-midi|cet après-midi|tonight|this evening|in the evening|this afternoon|in the afternoon|de la tarde|de la noche|esta tarde|esta noche|da tarde|da noite|hoje à noite|вечера|дня");
-const AM = word('du matin|ce matin|in the morning|de la mañana|da manhã|de manhã|утра');
-const POLITE = word("s['’]il te pla[iî]t|stp|svp|please|pls|plz|por favor|пожалуйста", 'giu');
+const NOON = new RegExp(`${word('(?:(?:à|at|a|al|ao|в)\\s+)?(?:midi|noon|mediod[ií]a|meio-dia|полдень)').source}|เที่ยง(?!คืน)`, 'iu');
+const MIDNIGHT = new RegExp(`${word('(?:(?:à|at|a|al|в)\\s+)?(?:minuit|midnight|medianoche|meia-noite|полночь)').source}|เที่ยงคืน`, 'iu');
+const TOMORROW = new RegExp(`${word('demain|tomorrow|amanh[ãa]|завтра|(?<!de la\\s)mañana').source}|พรุ่งนี้`, 'iu');
+const PM = new RegExp(`${word("ce soir|du soir|de l['’]après-midi|cet après-midi|tonight|this evening|in the evening|this afternoon|in the afternoon|de la tarde|de la noche|esta tarde|esta noche|da tarde|da noite|hoje à noite|вечера|дня").source}|เย็น|บ่าย|กลางคืน|ค่ำ`, 'iu');
+const AM = new RegExp(`${word('du matin|ce matin|in the morning|de la mañana|da manhã|de manhã|утра').source}|เช้า`, 'iu');
+const POLITE = new RegExp(`${word("s['’]il te pla[iî]t|stp|svp|please|pls|plz|por favor|пожалуйста", 'giu').source}|ได้ไหม|ได้มั้ย|กรุณา`, 'giu');
 // what comes before what to remind you of, once the rest is gone
-const LEAD = new RegExp("^(?:[\\s,:;.!?-]|d['’]|qu['’]|(?:capri|de que|de|que|pour|à|to|that|about|of|for|para|pra|me|о|об|что|чтобы|мне)(?![\\p{L}]))+", 'iu');
+const LEAD = new RegExp("^(?:[\\s,:;.!?-]|d['’]|qu['’]|ให้|ว่า|เพื่อ|เรื่อง|เกี่ยวกับ|(?:capri|de que|de|que|pour|à|to|that|about|of|for|para|pra|me|о|об|что|чтобы|мне)(?![\\p{L}]))+", 'iu');
 
 const MAX_MS = 7 * 24 * 3600 * 1000;
 
@@ -54,8 +58,8 @@ function number(word) {
 
 function unitMs(unit) {
   const u = unit.toLowerCase();
-  if (/^(s|sec|secs|seconde|secondes|second|seconds|segundo|segundos|секунд|секунду|секунды|сек)$/.test(u)) return 1000;
-  if (/^(h|hr|hrs|heure|heures|hour|hours|hora|horas|час|часа|часов|ч)$/.test(u)) return 3600 * 1000;
+  if (/^(s|sec|secs|seconde|secondes|second|seconds|segundo|segundos|секунд|секунду|секунды|сек|วินาที|วิ)$/.test(u)) return 1000;
+  if (/^(h|hr|hrs|heure|heures|hour|hours|hora|horas|час|часа|часов|ч|ชั่วโมง|ชม\.?)$/.test(u)) return 3600 * 1000;
   return 60 * 1000;
 }
 
@@ -127,7 +131,8 @@ export function parseReminder(text, now = Date.now()) {
   let what = text;
   for (const m of [trigger, ...(when?.spans || [])]) what = what.replace(m[0], ' ');
   what = what.replace(PM, ' ').replace(AM, ' ').replace(TOMORROW, ' ').replace(POLITE, ' ');
-  what = what.replace(/\s+/g, ' ').replace(LEAD, '').replace(/[\s,;:.!?]+$/, '').trim().slice(0, 140);
+  what = what.replace(/(?:หน่อย|นะ|ด้วย|ดิ)\s*$/u, '');
+  what = what.replace(/\s+/g, ' ').replace(LEAD, '').replace(/^ใน\s+/u, '').replace(LEAD, '').replace(/[\s,;:.!?]+$/, '').trim().slice(0, 140);
   const at = when && when.at - now >= 5000 && when.at - now <= MAX_MS ? when.at : null;
   return { at, text: what };
 }

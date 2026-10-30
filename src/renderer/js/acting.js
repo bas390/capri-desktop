@@ -81,8 +81,17 @@ export const ACTS = {
 
   // ---- one-shot acts ----
 
-  // little nods while the words come out, two drawings on threes
-  talk: { priority: 0, keys: rep(2, [[3, { head: 0.04, mane: 0.08 }], [3, { head: 0, mane: 0.03 }]]) },
+  // nods while the words come out. Loops until capri.js lets it go.
+  talk: {
+    priority: 1,
+    loop: true,
+    keys: [
+      [3, { head: 0.1, mane: 0.16, armL: 0.14, armR: 0.04 }],
+      [3, { head: -0.02, mane: 0.05, armL: 0.02, armR: 0.1 }],
+      [3, { head: 0.14, mane: 0.22, armL: 0.2, armR: 0.02 }],
+      [3, { head: 0.02, mane: 0.06, arms: 0.04 }],
+    ],
+  },
 
   // the cocked head: anticipation the other way, a smear, then a long hold
   curious: {
@@ -377,6 +386,44 @@ export const ACTS = {
       [1, { sx: 0.7, echo: [8, 0], mane: 0.25, arms: 0.15 }],
       [2, { sx: 1.06, sy: 0.95, mane: 0.15, arms: -0.06 }], // overshoot
       [1, { sx: 1 }],
+    ],
+  },
+
+  // a few beats in place: crouch, one arm up, the other, legs kicking. Loops until capri.js lets it go.
+  dance: {
+    loop: true,
+    fps: 24,
+    keys: [
+      [2, { bob: 4, sy: 0.9, sx: 1.08, arms: -0.22, head: 0.08, mane: -0.06 }],
+      [2, { bob: -18, sy: 1.08, sx: 0.94, armL: 0.72, armR: -0.12, head: -0.12, mane: 0.28, kickL: 0.32, smear: [0, 8] }],
+      [2, { bob: -8, armL: 0.34, armR: 0.12, head: 0.04, mane: 0.12, kickL: 0.08 }],
+      [2, { bob: 3, sy: 0.92, sx: 1.06, arms: -0.16, head: -0.06 }],
+      [2, { bob: -16, sy: 1.06, armL: -0.1, armR: 0.76, head: 0.14, mane: 0.3, kickR: 0.34, smear: [0, 8] }],
+      [2, { bob: -6, arms: 0.18, head: 0, mane: 0.1 }],
+    ],
+  },
+
+  // a few strides while she drifts: arms swap, the body leans into each step.
+  // Drawn on this body, in the same shapes as a walk cycle.
+  walk: {
+    priority: 1,
+    directional: true,
+    keys: rep(3, [
+      [3, { bob: -4, tilt: 5, armL: 0.42, armR: -0.22, hair: 4, sy: 1.05, sx: 0.97, head: -0.04 }],
+      [2, { bob: 2, tilt: 0, armL: 0.06, armR: 0.06, sy: 0.92, sx: 1.06, hair: 0 }],
+      [3, { bob: -4, tilt: -5, armL: -0.22, armR: 0.42, hair: -4, sy: 1.05, sx: 0.97, head: 0.04 }],
+      [2, { bob: 2, tilt: 0, armL: 0.06, armR: 0.06, sy: 0.92, sx: 1.06, hair: 0 }],
+    ]),
+  },
+
+  // one step: a lean, a kick, a short smear the way she's going
+  step: {
+    priority: 2,
+    directional: true,
+    keys: [
+      [2, { bob: 3, sy: 0.94, tilt: 5, armL: 0.22, armR: -0.18, kickL: 0.22, head: 0.06 }],
+      [2, { bob: -6, sy: 1.04, tilt: 7, armL: -0.12, armR: 0.36, kickR: 0.3, smear: [10, 0], mane: 0.14 }],
+      [2, { bob: 1, tilt: 2, arms: 0.04 }],
     ],
   },
 

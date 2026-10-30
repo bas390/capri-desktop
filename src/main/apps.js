@@ -2,7 +2,7 @@
 
 // Closing an app when you ask her to (chat.js), after you've confirmed with a click. The apps with
 // a window, by name; closing one the way its own close button does (it can still ask you to save),
-// and only if you ask again, forcing it. Windows only.
+// and only if you ask again, forcing it. Windows and macOS.
 
 const { execFile } = require('node:child_process');
 
@@ -11,7 +11,14 @@ const { execFile } = require('node:child_process');
 const KEEP = new Set([
   'explorer', 'applicationframehost', 'textinputhost', 'shellexperiencehost', 'startmenuexperiencehost',
   'searchhost', 'searchapp', 'lockapp', 'dwm', 'capri', 'electron', 'claude', 'codex', 'ollama', 'ollama app',
+  'finder', 'dock', 'systemuiserver', 'controlcenter', 'loginwindow', 'spotlight', 'universalcontrol',
 ]);
+
+function osascript(script, timeout = 8000) {
+  return new Promise((resolve, reject) => {
+    execFile('osascript', ['-e', script], { timeout }, (err, out) => (err ? reject(err) : resolve(String(out).trim())));
+  });
+}
 
 function powershell(script, timeout = 15000) {
   return new Promise((resolve, reject) => {
@@ -23,7 +30,31 @@ function powershell(script, timeout = 15000) {
 }
 
 // [{ name, process, ids }]: one per program with a window open ("AM Music", "Discord"...)
+async function listMac() {
+  const out = await osascript(
+    'tell application "System Events"\n'
+    + 'set out to ""\n'
+    + 'repeat with p in (application processes whose background only is false)\n'
+    + 'if (count of windows of p) > 0 then set out to out & (name of p) & "|" & (unix id of p) & linefeed\n'
+    + 'end repeat\n'
+    + 'return out\n'
+    + 'end tell',
+  );
+  const apps = new Map();
+  for (const line of out.split(/\n/)) {
+    const [name, pid] = line.split('|');
+    if (!name || !pid || KEEP.has(name.toLowerCase())) continue;
+    const id = Number(pid);
+    if (!id || id === process.pid) continue;
+    const app = apps.get(name) || { name, process: name, label: name, ids: [] };
+    app.ids.push(id);
+    apps.set(name, app);
+  }
+  return [...apps.values()];
+}
+
 async function list() {
+  if (process.platform === 'darwin') return listMac().catch(() => []);
   if (process.platform !== 'win32') return [];
   const out = await powershell(
     'Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } | '
@@ -64,6 +95,19 @@ async function find(wanted) {
 async function close(name, { force = false } = {}) {
   const app = (await list()).find((a) => a.process === name);
   if (!app) return { running: false };
+  if (process.platform === 'darwin') {
+    if (force) {
+      for (const id of app.ids) {
+        try { process.kill(id, 'SIGKILL'); } catch { /* already gone */ }
+      }
+    } else {
+      const quoted = JSON.stringify(app.name);
+      await osascript(`tell application ${quoted} to quit`).catch(() => {});
+    }
+    await new Promise((r) => setTimeout(r, force ? 600 : 2500));
+    const still = (await list().catch(() => [])).some((a) => a.process === name);
+    return { running: still };
+  }
   const ids = app.ids.join(',');
   const out = await powershell(force
     ? `Stop-Process -Id ${ids} -Force -ErrorAction SilentlyContinue; Start-Sleep -Milliseconds 600; `

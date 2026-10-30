@@ -15,8 +15,14 @@ import { Look } from './look.js';
 import { Pc } from './pc.js';
 import { linesFor } from './lines.js';
 import { pick, fmt, reducedMotion } from './util.js';
+import { loadStrips } from './strips.js';
 
 const host = window.host;
+
+// Metal on this Mac draws <img> pixels upside down. The file itself is upright.
+if (/Mac/.test(navigator.platform) || /Mac OS X/.test(navigator.userAgent)) {
+  document.documentElement.classList.add('is-mac');
+}
 
 function loadImage(src) {
   return new Promise((resolve, reject) => {
@@ -38,9 +44,10 @@ const SNOOZE_MS = 10 * 60 * 1000;
 const mine = (cfg) => ({ userName: cfg.userName || '', persona: cfg.persona || '', myLines: cfg.myLines || [], memories: cfg.memories || [] });
 
 async function boot() {
-  const [config, image, intro, ...cutins] = await Promise.all([
+  const [config, image, strips, intro, ...cutins] = await Promise.all([
     host.getConfig(),
     loadImage('../../assets/capri/capri-full.png'),
+    loadStrips(),
     // her intro: her close-up grabbing the screen, and its drawings with her mouth and arm moving
     Promise.all(GRAB_FRAMES.map((name) => loadImage(`../../assets/capri/intro-${name}.webp`).catch(() => null)))
       // decoded now, not the first time each one shows up (a hitch right on "hi", on the wave)
@@ -80,11 +87,17 @@ async function boot() {
     ticker: document.getElementById('ticker'),
     labels: linesFor(config.lang, config.assistant),
   });
+  panel.onSpeak = (line) => {
+    capri.talkLine = line;
+    voice.speak(line, host);
+  };
 
   const capri = new Capri({
     root: document.getElementById('capri'),
     canvas: document.getElementById('sprite'),
+    reel: document.getElementById('reel'),
     image,
+    strips,
     fx,
     voice,
   });
@@ -214,7 +227,9 @@ async function boot() {
     if (!panel.visible && Math.random() < (when === 'end' ? 0.6 : 0.4)) panel.say({ kind: 'info', line: pick(lines), hold: 3800 });
   };
   panel.onChar = (kind) => voice.play('blip', { mood: kind });
-  panel.onTalk = (talking) => talking && capri.perform('talk');
+  panel.onTalk = (talking, text) => capri.setLineTalking(talking, text);
+  voice.onSpeaking = (on) => capri.setSpeechTalking(on);
+  voice.onPending = (on) => capri.setSpeechPending(on);
   capri.onMenu = () => host.openMenu();
 
   // Her guide (guide.js): her welcome on first launch, and "How does it work?" in her menu,
@@ -812,7 +827,10 @@ async function boot() {
   const hooks = await host.hooksStatus();
   // her welcome: the first time, or while she's meant to watch Claude Code and isn't plugged into it
   if (!config.welcomed || (config.claude && !hooks.installed)) guide.welcome();
-  else panel.say({ kind: 'info', line: brain.onlineLine(), hold: 4000 });
+  else if (!config.guided) {
+    host.setConfig({ guided: true });
+    guide.menu();
+  } else panel.say({ kind: 'info', line: brain.onlineLine(), hold: 4000 });
 
   // In the evening, after a real day's work, she brings you her report card once, on her own,
   // at a quiet moment.
