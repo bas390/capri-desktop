@@ -18,7 +18,7 @@
     "hooks:agy:uninstall": "node scripts/install-hooks-agy.js --uninstall",
     "check:llm": "node scripts/check-llm.js",
     "test:hooks": "node --test tests/hooks.test.js",
-    "dist": "electron-builder --win"
+    "dist": "node scripts/fetch-win-sherpa.js && electron-builder --win"
   },
   "keywords": [
     "claude-code",

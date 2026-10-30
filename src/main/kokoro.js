@@ -58,8 +58,16 @@ function modelReady() {
     && fs.existsSync(path.join(LIB, 'sherpa-onnx.node'));
 }
 
+function modulesDir() {
+  // Packaged, ROOT is the app.asar file. The real modules sit beside it, unpacked.
+  const base = ROOT.endsWith(`${path.sep}app.asar`) ? `${ROOT}.unpacked` : ROOT;
+  return path.join(base, 'node_modules');
+}
+
 function childEnv() {
   const env = { ...process.env };
+  const modules = modulesDir();
+  env.NODE_PATH = env.NODE_PATH ? `${modules}${path.delimiter}${env.NODE_PATH}` : modules;
   if (!LIB) return env;
   if (process.platform === 'win32') env.PATH = `${LIB}${path.delimiter}${env.PATH || ''}`;
   else if (process.platform === 'darwin') env.DYLD_LIBRARY_PATH = `${LIB}${path.delimiter}${env.DYLD_LIBRARY_PATH || ''}`;
@@ -69,8 +77,11 @@ function childEnv() {
 
 function start() {
   if (child || !modelReady()) return;
-  child = spawn(process.env.KOKORO_NODE || 'node', [unpacked(path.join(__dirname, 'kokoro-worker.js')), MODEL], {
-    cwd: ROOT,
+  const worker = unpacked(path.join(__dirname, 'kokoro-worker.js'));
+  child = spawn(process.env.KOKORO_NODE || 'node', [worker, MODEL], {
+    // The worker's own folder. Never the app.asar file: that is not a directory,
+    // so the voice process would exit before it spoke.
+    cwd: path.dirname(worker),
     env: childEnv(),
     stdio: ['pipe', 'pipe', 'ignore'],
   });
